@@ -44,6 +44,8 @@
         phaseIndex = 0,
         phaseScales = [1],
         phaseSampleCaps = [200];
+      const HIT_EPS = 1e-4,
+        RAY_BIAS = 1e-3;
 
       const _v = (x, y, z) => ({ x, y, z }),
         dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
@@ -161,7 +163,7 @@
             h = b * b - c;
           if (h < 0) continue;
           let res = -b - Math.sqrt(h);
-          if (res > 0.01 && res < t) {
+          if (res > HIT_EPS && res < t) {
             t = res;
             obj = s;
           }
@@ -172,7 +174,8 @@
           n = norm(sub(p, obj.p));
         // Cosine-weighted hemisphere bounce for lower-variance Lambertian sampling.
         let rd = cosineSampleHemisphere(n);
-        let bce = trace(p, rd, depth + 1);
+        // Push secondary rays off the surface to avoid self-hit acne near contacts.
+        let bce = trace(add(p, mul(n, RAY_BIAS)), rd, depth + 1);
         // Add emitted light and modulate bounced light by surface color (albedo).
         return add(
           obj.e,
@@ -202,13 +205,18 @@
             acc[i * 3 + 2] += c.z;
             // Average all samples so far, then apply simple gamma correction.
             img.data[i * 4] = Math.pow(acc[i * 3] / samples, 0.45) * 255;
-            img.data[i * 4 + 1] = Math.pow(acc[i * 3 + 1] / samples, 0.45) * 255;
-            img.data[i * 4 + 2] = Math.pow(acc[i * 3 + 2] / samples, 0.45) * 255;
+            img.data[i * 4 + 1] =
+              Math.pow(acc[i * 3 + 1] / samples, 0.45) * 255;
+            img.data[i * 4 + 2] =
+              Math.pow(acc[i * 3 + 2] / samples, 0.45) * 255;
             img.data[i * 4 + 3] = 255;
           }
           ctx.putImageData(img, 0, 0);
 
-          if (samples >= phaseSampleCaps[phaseIndex] && phaseIndex < phaseScales.length - 1) {
+          if (
+            samples >= phaseSampleCaps[phaseIndex] &&
+            phaseIndex < phaseScales.length - 1
+          ) {
             // Progressive upscale: restart accumulation at a finer internal resolution.
             phaseIndex++;
             configureRenderTargets(false);
@@ -217,7 +225,8 @@
           }
 
           // Keep refining until target sample count is reached.
-          if (samples < phaseSampleCaps[phaseIndex]) requestAnimationFrame(frame);
+          if (samples < phaseSampleCaps[phaseIndex])
+            requestAnimationFrame(frame);
         }
 
         frame();
