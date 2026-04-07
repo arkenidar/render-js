@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>path-tracer renderer</title>
     <style>
+      /* Use dynamic viewport height to avoid mobile browser UI jump issues. */
       html,
       body {
         margin: 0;
@@ -18,6 +19,7 @@
         place-items: center;
       }
 
+      /* Keep a square canvas that fits whichever viewport dimension is smaller. */
       #c {
         width: min(92vw, 92svh);
         height: auto;
@@ -80,6 +82,7 @@
       }
 
       function pickQualityProfile() {
+        // Treat coarse pointers or narrow screens as likely mobile devices.
         const coarsePointer = matchMedia("(pointer: coarse)").matches;
         const narrowViewport = matchMedia("(max-width: 768px)").matches;
         const isMobile = coarsePointer || narrowViewport;
@@ -90,6 +93,7 @@
         let targetSamples = isMobile ? 120 : 220;
 
         if (lowPower) {
+          // Reduce load on low-core devices to preserve responsiveness.
           baseScale *= 0.8;
           targetSamples = Math.min(targetSamples, 90);
         }
@@ -101,6 +105,7 @@
       }
 
       function configureRenderTargets(resetPhase = true) {
+        // Cap DPR to avoid excessively large buffers on high-density phones.
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const cssSize = Math.floor(
           Math.min(window.innerWidth * 0.92, window.innerHeight * 0.92),
@@ -110,6 +115,7 @@
         maxSamples = profile.targetSamples;
         if (resetPhase) {
           phaseIndex = 0;
+          // Phase 1: fast preview, Phase 2: final quality.
           phaseScales = [
             clamp(profile.baseScale * 0.7, 0.3, 0.8),
             profile.baseScale,
@@ -176,6 +182,7 @@
 
       // Renders one progressive sample per pixel and accumulates over frames.
       function draw() {
+        // Snapshot run id so old animation loops can self-cancel after restart().
         const localRunId = runId;
         let img = ctx.getImageData(0, 0, w, h);
 
@@ -217,6 +224,7 @@
       }
 
       function restart() {
+        // Increment run id to invalidate any in-flight frame loops.
         runId++;
         configureRenderTargets(true);
         draw();
@@ -225,6 +233,7 @@
       let resizeTimer = 0;
       window.addEventListener("resize", () => {
         clearTimeout(resizeTimer);
+        // Debounce resize/orientation changes to avoid repeated heavy resets.
         resizeTimer = setTimeout(restart, 120);
       });
 
