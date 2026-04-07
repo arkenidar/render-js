@@ -40,10 +40,7 @@
         acc = null;
       let samples = 0,
         maxSamples = 200,
-        runId = 0,
-        phaseIndex = 0,
-        phaseScales = [1],
-        phaseSampleCaps = [200];
+        runId = 0;
       const HIT_EPS = 1e-4,
         RAY_BIAS = 1e-3,
         MAX_DEPTH = 12,
@@ -109,7 +106,7 @@
         };
       }
 
-      function configureRenderTargets(resetPhase = true) {
+      function configureRenderTargets() {
         // Cap DPR to avoid excessively large buffers on high-density phones.
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const cssSize = Math.floor(
@@ -118,21 +115,9 @@
         const profile = pickQualityProfile();
 
         maxSamples = profile.targetSamples;
-        if (resetPhase) {
-          phaseIndex = 0;
-          // Phase 1: fast preview, Phase 2: final quality.
-          phaseScales = [
-            clamp(profile.baseScale * 0.7, 0.3, 0.8),
-            profile.baseScale,
-          ];
-          phaseSampleCaps = [
-            Math.max(12, Math.floor(maxSamples * 0.35)),
-            maxSamples,
-          ];
-        }
 
         const targetInternal = clamp(
-          Math.round(cssSize * dpr * phaseScales[phaseIndex]),
+          Math.round(cssSize * dpr * profile.baseScale),
           128,
           700,
         );
@@ -182,7 +167,11 @@
         const phi = 2 * Math.PI * v;
         const lp = add(
           light.p,
-          _v(light.r * r * Math.cos(phi), light.r * z, light.r * r * Math.sin(phi)),
+          _v(
+            light.r * r * Math.cos(phi),
+            light.r * z,
+            light.r * r * Math.sin(phi),
+          ),
         );
 
         const toL = sub(lp, p);
@@ -200,7 +189,11 @@
         if (lDot <= 0) return _v(0, 0, 0);
 
         // Shadow test: if something is hit before the sampled light point, it is occluded.
-        const shadow = intersectScene(add(p, mul(n, RAY_BIAS)), wi, dist - HIT_EPS);
+        const shadow = intersectScene(
+          add(p, mul(n, RAY_BIAS)),
+          wi,
+          dist - HIT_EPS,
+        );
         if (shadow.obj) return _v(0, 0, 0);
 
         const pdf = 1 / (4 * Math.PI * light.r * light.r);
@@ -276,20 +269,8 @@
           }
           ctx.putImageData(img, 0, 0);
 
-          if (
-            samples >= phaseSampleCaps[phaseIndex] &&
-            phaseIndex < phaseScales.length - 1
-          ) {
-            // Progressive upscale: restart accumulation at a finer internal resolution.
-            phaseIndex++;
-            configureRenderTargets(false);
-            draw();
-            return;
-          }
-
           // Keep refining until target sample count is reached.
-          if (samples < phaseSampleCaps[phaseIndex])
-            requestAnimationFrame(frame);
+          if (samples < maxSamples) requestAnimationFrame(frame);
         }
 
         frame();
@@ -298,7 +279,7 @@
       function restart() {
         // Increment run id to invalidate any in-flight frame loops.
         runId++;
-        configureRenderTargets(true);
+        configureRenderTargets();
         draw();
       }
 
