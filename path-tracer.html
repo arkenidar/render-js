@@ -45,7 +45,10 @@
         phaseScales = [1],
         phaseSampleCaps = [200];
       const HIT_EPS = 1e-4,
-        RAY_BIAS = 1e-3;
+        RAY_BIAS = 1e-3,
+        MAX_DEPTH = 12,
+        RR_START_DEPTH = 3,
+        RR_KEEP_PROB = 0.8;
 
       const _v = (x, y, z) => ({ x, y, z }),
         dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
@@ -211,7 +214,7 @@
         const t = hit.t;
         const obj = hit.obj;
         // Stop when we miss geometry or reach max bounce depth.
-        if (!obj || depth > 3) return _v(0, 0, 0);
+        if (!obj || depth >= MAX_DEPTH) return _v(0, 0, 0);
         let p = add(o, mul(d, t)),
           n = norm(sub(p, obj.p));
 
@@ -219,8 +222,19 @@
         const direct = estimateDirectLight(p, n);
         // Cosine-weighted hemisphere bounce for lower-variance Lambertian sampling.
         let rd = cosineSampleHemisphere(n);
-        // Push secondary rays off the surface to avoid self-hit acne near contacts.
-        let bce = trace(add(p, mul(n, RAY_BIAS)), rd, depth + 1);
+        const nextOrigin = add(p, mul(n, RAY_BIAS));
+
+        // Step 2: Russian roulette skips some deep paths and rescales survivors.
+        // This preserves expected energy while reducing wasted recursion work.
+        let bce = _v(0, 0, 0);
+        if (depth >= RR_START_DEPTH) {
+          if (Math.random() < RR_KEEP_PROB) {
+            bce = mul(trace(nextOrigin, rd, depth + 1), 1 / RR_KEEP_PROB);
+          }
+        } else {
+          bce = trace(nextOrigin, rd, depth + 1);
+        }
+
         // Add emitted light and modulate bounced light by surface color (albedo).
         return add(
           obj.e,
