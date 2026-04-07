@@ -34,7 +34,32 @@
         add = (a, b) => _v(a.x + b.x, a.y + b.y, a.z + b.z),
         sub = (a, b) => _v(a.x - b.x, a.y - b.y, a.z - b.z),
         mul = (a, s) => _v(a.x * s, a.y * s, a.z * s),
+        cross = (a, b) =>
+          _v(
+            a.y * b.z - a.z * b.y,
+            a.z * b.x - a.x * b.z,
+            a.x * b.y - a.y * b.x,
+          ),
         norm = (v) => mul(v, 1 / Math.sqrt(dot(v, v)));
+
+      function cosineSampleHemisphere(n) {
+        const r1 = Math.random();
+        const r2 = Math.random();
+        const phi = 2 * Math.PI * r1;
+        const sr2 = Math.sqrt(r2);
+
+        // Local cosine-weighted direction in tangent space.
+        const x = Math.cos(phi) * sr2;
+        const y = Math.sin(phi) * sr2;
+        const z = Math.sqrt(1 - r2);
+
+        // Build an orthonormal basis around the shading normal.
+        const up = Math.abs(n.x) > 0.1 ? _v(0, 1, 0) : _v(1, 0, 0);
+        const t = norm(cross(up, n));
+        const b = cross(n, t);
+
+        return norm(add(add(mul(t, x), mul(b, y)), mul(n, z)));
+      }
 
       const scene = [
         { p: _v(0, -100.5, 0), r: 100, c: _v(0.7, 0.7, 0.7), e: _v(0, 0, 0) }, // Floor
@@ -66,13 +91,8 @@
         if (!obj || depth > 3) return _v(0, 0, 0);
         let p = add(o, mul(d, t)),
           n = norm(sub(p, obj.p));
-        // Cosine-like diffuse bounce from the surface normal + random jitter.
-        let rd = norm(
-          add(
-            n,
-            _v(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5),
-          ),
-        );
+        // Cosine-weighted hemisphere bounce for lower-variance Lambertian sampling.
+        let rd = cosineSampleHemisphere(n);
         let bce = trace(p, rd, depth + 1);
         // Add emitted light and modulate bounced light by surface color (albedo).
         return add(
