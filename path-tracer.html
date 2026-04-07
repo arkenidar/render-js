@@ -4,30 +4,44 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>path-tracer renderer</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+        background: #000;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+      }
+
+      #c {
+        width: min(92vw, 92svh);
+        height: auto;
+        aspect-ratio: 1 / 1;
+        border: 1px solid #333;
+        display: block;
+        image-rendering: auto;
+      }
+    </style>
   </head>
-  <body
-    style="
-      background: #000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      margin: 0;
-    "
-  >
-    <canvas
-      id="c"
-      width="512"
-      height="512"
-      style="max-width: 90vh; border: 1px solid #333"
-    ></canvas>
+  <body>
+    <canvas id="c"></canvas>
     <script>
       const canvas = document.getElementById("c"),
         ctx = canvas.getContext("2d");
-      const w = 512,
-        h = 512,
-        acc = new Float32Array(w * h * 3);
-      let samples = 0;
+      let w = 0,
+        h = 0,
+        acc = null;
+      let samples = 0,
+        maxSamples = 200,
+        runId = 0,
+        phaseIndex = 0,
+        phaseScales = [1],
+        phaseSampleCaps = [200];
 
       const _v = (x, y, z) => ({ x, y, z }),
         dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
@@ -59,6 +73,65 @@
         const b = cross(n, t);
 
         return norm(add(add(mul(t, x), mul(b, y)), mul(n, z)));
+      }
+
+      function clamp(v, lo, hi) {
+        return Math.max(lo, Math.min(hi, v));
+      }
+
+      function pickQualityProfile() {
+        const coarsePointer = matchMedia("(pointer: coarse)").matches;
+        const narrowViewport = matchMedia("(max-width: 768px)").matches;
+        const isMobile = coarsePointer || narrowViewport;
+        const hw = navigator.hardwareConcurrency || 8;
+        const lowPower = hw <= 4;
+
+        let baseScale = isMobile ? 0.55 : 0.9;
+        let targetSamples = isMobile ? 120 : 220;
+
+        if (lowPower) {
+          baseScale *= 0.8;
+          targetSamples = Math.min(targetSamples, 90);
+        }
+
+        return {
+          baseScale: clamp(baseScale, 0.35, 1),
+          targetSamples,
+        };
+      }
+
+      function configureRenderTargets(resetPhase = true) {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const cssSize = Math.floor(
+          Math.min(window.innerWidth * 0.92, window.innerHeight * 0.92),
+        );
+        const profile = pickQualityProfile();
+
+        maxSamples = profile.targetSamples;
+        if (resetPhase) {
+          phaseIndex = 0;
+          phaseScales = [
+            clamp(profile.baseScale * 0.7, 0.3, 0.8),
+            profile.baseScale,
+          ];
+          phaseSampleCaps = [
+            Math.max(12, Math.floor(maxSamples * 0.35)),
+            maxSamples,
+          ];
+        }
+
+        const targetInternal = clamp(
+          Math.round(cssSize * dpr * phaseScales[phaseIndex]),
+          128,
+          700,
+        );
+
+        canvas.width = targetInternal;
+        canvas.height = targetInternal;
+        w = canvas.width;
+        h = canvas.height;
+        acc = new Float32Array(w * h * 3);
+        samples = 0;
       }
 
       const scene = [
@@ -103,30 +176,59 @@
 
       // Renders one progressive sample per pixel and accumulates over frames.
       function draw() {
+        const localRunId = runId;
         let img = ctx.getImageData(0, 0, w, h);
-        samples++;
-        for (let i = 0; i < w * h; i++) {
-          let x = i % w,
-            y = (i / w) | 0;
-          // Jitter camera rays within each pixel for stochastic anti-aliasing.
-          const u = (x + Math.random()) / w;
-          const v = (y + Math.random()) / h;
-          let d = norm(_v(u - 0.5, 0.5 - v, -1));
-          let c = trace(_v(0, 0, 2.5), d, 0);
-          acc[i * 3] += c.x;
-          acc[i * 3 + 1] += c.y;
-          acc[i * 3 + 2] += c.z;
-          // Average all samples so far, then apply simple gamma correction.
-          img.data[i * 4] = Math.pow(acc[i * 3] / samples, 0.45) * 255;
-          img.data[i * 4 + 1] = Math.pow(acc[i * 3 + 1] / samples, 0.45) * 255;
-          img.data[i * 4 + 2] = Math.pow(acc[i * 3 + 2] / samples, 0.45) * 255;
-          img.data[i * 4 + 3] = 255;
+
+        function frame() {
+          if (localRunId !== runId) return;
+          samples++;
+          for (let i = 0; i < w * h; i++) {
+            let x = i % w,
+              y = (i / w) | 0;
+            // Jitter camera rays within each pixel for stochastic anti-aliasing.
+            const u = (x + Math.random()) / w;
+            const v = (y + Math.random()) / h;
+            let d = norm(_v(u - 0.5, 0.5 - v, -1));
+            let c = trace(_v(0, 0, 2.5), d, 0);
+            acc[i * 3] += c.x;
+            acc[i * 3 + 1] += c.y;
+            acc[i * 3 + 2] += c.z;
+            // Average all samples so far, then apply simple gamma correction.
+            img.data[i * 4] = Math.pow(acc[i * 3] / samples, 0.45) * 255;
+            img.data[i * 4 + 1] = Math.pow(acc[i * 3 + 1] / samples, 0.45) * 255;
+            img.data[i * 4 + 2] = Math.pow(acc[i * 3 + 2] / samples, 0.45) * 255;
+            img.data[i * 4 + 3] = 255;
+          }
+          ctx.putImageData(img, 0, 0);
+
+          if (samples >= phaseSampleCaps[phaseIndex] && phaseIndex < phaseScales.length - 1) {
+            // Progressive upscale: restart accumulation at a finer internal resolution.
+            phaseIndex++;
+            configureRenderTargets(false);
+            draw();
+            return;
+          }
+
+          // Keep refining until target sample count is reached.
+          if (samples < phaseSampleCaps[phaseIndex]) requestAnimationFrame(frame);
         }
-        ctx.putImageData(img, 0, 0);
-        // Keep refining until target sample count is reached.
-        if (samples < 200) requestAnimationFrame(draw);
+
+        frame();
       }
-      draw();
+
+      function restart() {
+        runId++;
+        configureRenderTargets(true);
+        draw();
+      }
+
+      let resizeTimer = 0;
+      window.addEventListener("resize", () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(restart, 120);
+      });
+
+      restart();
     </script>
   </body>
 </html>
