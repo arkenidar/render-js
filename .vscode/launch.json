@@ -1,0 +1,11 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "editor-browser",
+      "request": "launch",
+      "name": "Launch in Integrated Browser",
+      "url": "file://${workspaceFolder}/path-tracer.html"
+    }
+  ]
+}
