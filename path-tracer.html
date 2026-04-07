@@ -151,12 +151,11 @@
         { p: _v(-0.3, -0.2, 0), r: 0.3, c: _v(0.9, 0.9, 0.9), e: _v(0, 0, 0) }, // Sphere 1
         { p: _v(0.3, -0.1, 0.5), r: 0.4, c: _v(0.9, 0.9, 0.9), e: _v(0, 0, 0) }, // Sphere 2
       ];
+      const light = scene[1];
 
-      // Traces one ray path recursively and returns incoming radiance.
-      function trace(o, d, depth) {
-        let t = 1e9,
+      function intersectScene(o, d, tMax = 1e9) {
+        let t = tMax,
           obj = null;
-        // Find closest ray-sphere intersection in the scene.
         for (let s of scene) {
           let b = dot(sub(o, s.p), d),
             c = dot(sub(o, s.p), sub(o, s.p)) - s.r * s.r,
@@ -168,10 +167,56 @@
             obj = s;
           }
         }
+        return { t, obj };
+      }
+
+      // Step 1: next-event estimation by explicitly sampling a point on the light.
+      function estimateDirectLight(p, n) {
+        const u = Math.random();
+        const v = Math.random();
+        const z = 1 - 2 * u;
+        const r = Math.sqrt(Math.max(0, 1 - z * z));
+        const phi = 2 * Math.PI * v;
+        const lp = add(
+          light.p,
+          _v(light.r * r * Math.cos(phi), light.r * z, light.r * r * Math.sin(phi)),
+        );
+
+        const toL = sub(lp, p);
+        const dist2 = dot(toL, toL);
+        if (dist2 <= 1e-12) return _v(0, 0, 0);
+        const dist = Math.sqrt(dist2);
+        const wi = mul(toL, 1 / dist);
+
+        const nDotL = Math.max(0, dot(n, wi));
+        if (nDotL <= 0) return _v(0, 0, 0);
+
+        // Light emits from the inward-facing side of the ceiling sphere.
+        const lightInwardNormal = norm(sub(light.p, lp));
+        const lDot = Math.max(0, dot(lightInwardNormal, mul(wi, -1)));
+        if (lDot <= 0) return _v(0, 0, 0);
+
+        // Shadow test: if something is hit before the sampled light point, it is occluded.
+        const shadow = intersectScene(add(p, mul(n, RAY_BIAS)), wi, dist - HIT_EPS);
+        if (shadow.obj) return _v(0, 0, 0);
+
+        const pdf = 1 / (4 * Math.PI * light.r * light.r);
+        const geometry = (nDotL * lDot) / dist2;
+        return mul(light.e, geometry / pdf);
+      }
+
+      // Traces one ray path recursively and returns incoming radiance.
+      function trace(o, d, depth) {
+        const hit = intersectScene(o, d);
+        const t = hit.t;
+        const obj = hit.obj;
         // Stop when we miss geometry or reach max bounce depth.
         if (!obj || depth > 3) return _v(0, 0, 0);
         let p = add(o, mul(d, t)),
           n = norm(sub(p, obj.p));
+
+        // Step 1 direct-light term reduces noise by sampling the emitter explicitly.
+        const direct = estimateDirectLight(p, n);
         // Cosine-weighted hemisphere bounce for lower-variance Lambertian sampling.
         let rd = cosineSampleHemisphere(n);
         // Push secondary rays off the surface to avoid self-hit acne near contacts.
@@ -179,7 +224,11 @@
         // Add emitted light and modulate bounced light by surface color (albedo).
         return add(
           obj.e,
-          _v(obj.c.x * bce.x, obj.c.y * bce.y, obj.c.z * bce.z),
+          _v(
+            obj.c.x * (direct.x + bce.x),
+            obj.c.y * (direct.y + bce.y),
+            obj.c.z * (direct.z + bce.z),
+          ),
         );
       }
 
