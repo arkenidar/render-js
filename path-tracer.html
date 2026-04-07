@@ -131,15 +131,43 @@
       }
 
       const scene = [
-        { p: _v(0, -100.5, 0), r: 100, c: _v(0.7, 0.7, 0.7), e: _v(0, 0, 0) }, // Floor
-        { p: _v(0, 100.5, 0), r: 100, c: _v(0.7, 0.7, 0.7), e: _v(4, 4, 4) }, // Light Ceiling
-        { p: _v(0, 0, 101), r: 100, c: _v(0.7, 0.7, 0.7), e: _v(0, 0, 0) }, // Back
-        { p: _v(-101, 0, 0), r: 100, c: _v(0.8, 0.1, 0.1), e: _v(0, 0, 0) }, // Red Wall
-        { p: _v(101, 0, 0), r: 100, c: _v(0.1, 0.1, 0.8), e: _v(0, 0, 0) }, // Blue Wall
-        { p: _v(-0.3, -0.2, 0), r: 0.3, c: _v(0.9, 0.9, 0.9), e: _v(0, 0, 0) }, // Sphere 1
-        { p: _v(0.3, -0.1, 0.5), r: 0.4, c: _v(0.9, 0.9, 0.9), e: _v(0, 0, 0) }, // Sphere 2
+        {
+          p: _v(0, -100.5, 0),
+          r: 100,
+          c: _v(0.74, 0.72, 0.68),
+          e: _v(0, 0, 0),
+        }, // Floor
+        {
+          p: _v(0, 100.5, 0),
+          r: 100,
+          c: _v(0.7, 0.7, 0.7),
+          e: _v(4.8, 4.2, 3.6),
+        }, // Light Ceiling
+        { p: _v(0, 0, 101), r: 100, c: _v(0.62, 0.66, 0.72), e: _v(0, 0, 0) }, // Back
+        { p: _v(-101, 0, 0), r: 100, c: _v(0.85, 0.18, 0.14), e: _v(0, 0, 0) }, // Red Wall
+        { p: _v(101, 0, 0), r: 100, c: _v(0.16, 0.26, 0.86), e: _v(0, 0, 0) }, // Blue Wall
+        {
+          p: _v(-0.3, -0.2, 0),
+          r: 0.3,
+          c: _v(0.94, 0.86, 0.72),
+          e: _v(0, 0, 0),
+        }, // Sphere 1
+        {
+          p: _v(0.3, -0.1, 0.5),
+          r: 0.4,
+          c: _v(0.78, 0.9, 0.96),
+          e: _v(0, 0, 0),
+        }, // Sphere 2
       ];
       const light = scene[1];
+
+      function toneMapACES(x) {
+        return clamp(
+          (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14),
+          0,
+          1,
+        );
+      }
 
       function intersectScene(o, d, tMax = 1e9) {
         let t = tMax,
@@ -254,17 +282,23 @@
             // Jitter camera rays within each pixel for stochastic anti-aliasing.
             const u = (x + Math.random()) / w;
             const v = (y + Math.random()) / h;
-            let d = norm(_v(u - 0.5, 0.5 - v, -1));
+            let d = norm(_v((u - 0.5) * 0.92, (0.5 - v) * 0.92, -1));
             let c = trace(_v(0, 0, 2.5), d, 0);
             acc[i * 3] += c.x;
             acc[i * 3 + 1] += c.y;
             acc[i * 3 + 2] += c.z;
-            // Average all samples so far, then apply simple gamma correction.
-            img.data[i * 4] = Math.pow(acc[i * 3] / samples, 0.45) * 255;
-            img.data[i * 4 + 1] =
-              Math.pow(acc[i * 3 + 1] / samples, 0.45) * 255;
-            img.data[i * 4 + 2] =
-              Math.pow(acc[i * 3 + 2] / samples, 0.45) * 255;
+            // Filmic display mapping with a subtle vignette for a softer final image.
+            const nx = ((x + 0.5) / w) * 2 - 1;
+            const ny = ((y + 0.5) / h) * 2 - 1;
+            const vignette = clamp(1 - 0.16 * (nx * nx + ny * ny), 0.82, 1);
+            const exposure = 0.92;
+            // Slight warm balance avoids sterile white clipping in bright regions.
+            const lr = (acc[i * 3] / samples) * exposure * vignette * 1.02;
+            const lg = (acc[i * 3 + 1] / samples) * exposure * vignette * 0.99;
+            const lb = (acc[i * 3 + 2] / samples) * exposure * vignette * 0.95;
+            img.data[i * 4] = Math.pow(toneMapACES(lr), 1 / 2.2) * 255;
+            img.data[i * 4 + 1] = Math.pow(toneMapACES(lg), 1 / 2.2) * 255;
+            img.data[i * 4 + 2] = Math.pow(toneMapACES(lb), 1 / 2.2) * 255;
             img.data[i * 4 + 3] = 255;
           }
           ctx.putImageData(img, 0, 0);
