@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>path-tracer renderer</title>
+  </head>
+  <body
+    style="
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    "
+  >
+    <canvas
+      id="c"
+      width="512"
+      height="512"
+      style="max-width: 90vh; border: 1px solid #333"
+    ></canvas>
+    <script>
+      const canvas = document.getElementById("c"),
+        ctx = canvas.getContext("2d");
+      const w = 512,
+        h = 512,
+        acc = new Float32Array(w * h * 3);
+      let samples = 0;
+
+      const _v = (x, y, z) => ({ x, y, z }),
+        dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
+        add = (a, b) => _v(a.x + b.x, a.y + b.y, a.z + b.z),
+        sub = (a, b) => _v(a.x - b.x, a.y - b.y, a.z - b.z),
+        mul = (a, s) => _v(a.x * s, a.y * s, a.z * s),
+        norm = (v) => mul(v, 1 / Math.sqrt(dot(v, v)));
+
+      const scene = [
+        { p: _v(0, -100.5, 0), r: 100, c: _v(0.7, 0.7, 0.7), e: _v(0, 0, 0) }, // Floor
+        { p: _v(0, 100.5, 0), r: 100, c: _v(0.7, 0.7, 0.7), e: _v(4, 4, 4) }, // Light Ceiling
+        { p: _v(0, 0, 101), r: 100, c: _v(0.7, 0.7, 0.7), e: _v(0, 0, 0) }, // Back
+        { p: _v(-101, 0, 0), r: 100, c: _v(0.8, 0.1, 0.1), e: _v(0, 0, 0) }, // Red Wall
+        { p: _v(101, 0, 0), r: 100, c: _v(0.1, 0.1, 0.8), e: _v(0, 0, 0) }, // Blue Wall
+        { p: _v(-0.3, -0.2, 0), r: 0.3, c: _v(0.9, 0.9, 0.9), e: _v(0, 0, 0) }, // Sphere 1
+        { p: _v(0.3, -0.1, 0.5), r: 0.4, c: _v(0.9, 0.9, 0.9), e: _v(0, 0, 0) }, // Sphere 2
+      ];
+
+      // Traces one ray path recursively and returns incoming radiance.
+      function trace(o, d, depth) {
+        let t = 1e9,
+          obj = null;
+        // Find closest ray-sphere intersection in the scene.
+        for (let s of scene) {
+          let b = dot(sub(o, s.p), d),
+            c = dot(sub(o, s.p), sub(o, s.p)) - s.r * s.r,
+            h = b * b - c;
+          if (h < 0) continue;
+          let res = -b - Math.sqrt(h);
+          if (res > 0.01 && res < t) {
+            t = res;
+            obj = s;
+          }
+        }
+        // Stop when we miss geometry or reach max bounce depth.
+        if (!obj || depth > 3) return _v(0, 0, 0);
+        let p = add(o, mul(d, t)),
+          n = norm(sub(p, obj.p));
+        // Cosine-like diffuse bounce from the surface normal + random jitter.
+        let rd = norm(
+          add(
+            n,
+            _v(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5),
+          ),
+        );
+        let bce = trace(p, rd, depth + 1);
+        // Add emitted light and modulate bounced light by surface color (albedo).
+        return add(
+          obj.e,
+          _v(obj.c.x * bce.x, obj.c.y * bce.y, obj.c.z * bce.z),
+        );
+      }
+
+      // Renders one progressive sample per pixel and accumulates over frames.
+      function draw() {
+        let img = ctx.getImageData(0, 0, w, h);
+        samples++;
+        for (let i = 0; i < w * h; i++) {
+          let x = i % w,
+            y = (i / w) | 0;
+          let d = norm(_v(x / w - 0.5, 0.5 - y / h, -1));
+          let c = trace(_v(0, 0, 2.5), d, 0);
+          acc[i * 3] += c.x;
+          acc[i * 3 + 1] += c.y;
+          acc[i * 3 + 2] += c.z;
+          // Average all samples so far, then apply simple gamma correction.
+          img.data[i * 4] = Math.pow(acc[i * 3] / samples, 0.45) * 255;
+          img.data[i * 4 + 1] = Math.pow(acc[i * 3 + 1] / samples, 0.45) * 255;
+          img.data[i * 4 + 2] = Math.pow(acc[i * 3 + 2] / samples, 0.45) * 255;
+          img.data[i * 4 + 3] = 255;
+        }
+        ctx.putImageData(img, 0, 0);
+        // Keep refining until target sample count is reached.
+        if (samples < 200) requestAnimationFrame(draw);
+      }
+      draw();
+    </script>
+  </body>
+</html>
